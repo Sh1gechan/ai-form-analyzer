@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Forma</string>
+    
+    <!-- Permissions -->
+    <string name="camera_permission_required">カメラの権限が必要です</string>
+    <string name="storage_permission_required">ストレージの権限が必要です</string>
+    
+    <!-- Common -->
+    <string name="ok">OK</string>
+    <string name="cancel">キャンセル</string>
+    <string name="retry">再試行</string>
+    <string name="save">保存</string>
+    <string name="share">共有</string>
+    <string name="settings">設定</string>
+    
+    <!-- Home Screen -->
+    <string name="record_video">動画を撮影</string>
+    <string name="select_video">動画を選択</string>
+    <string name="analysis_history">分析履歴</string>
+    
+    <!-- Analysis -->
+    <string name="analysis_in_progress">分析中...</string>
+    <string name="analysis_completed">分析完了</string>
+    <string name="analysis_failed">分析に失敗しました</string>
+    
+    <!-- Settings -->
+    <string name="api_key_label">Gemini API キー</string>
+    <string name="custom_prompt_label">カスタムプロンプト</string>
+    <string name="cache_management">キャッシュ管理</string>
+    <string name="clear_cache">キャッシュクリア</string>
+    
+    <!-- Results -->
+    <string name="view_video">動画で確認</string>
+    <string name="view_summary">サマリー</string>
+    <string name="export_video">動画エクスポート</string>
+    <string name="toggle_overlay">オーバーレイ切替</string>
+</resources>
+
+

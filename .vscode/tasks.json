@@ -1,0 +1,62 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "🔨 Build Debug APK",
+      "type": "shell",
+      "command": "./gradlew assembleDebug",
+      "options": { "cwd": "${workspaceFolder}/android" },
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "📱 Start Emulator (Pixel_7a)",
+      "type": "shell",
+      "command": "/Users/shige/Library/Android/sdk/emulator/emulator -avd Pixel_7a &",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": [],
+      "isBackground": true
+    },
+    {
+      "label": "⏳ Wait for Emulator Boot",
+      "type": "shell",
+      "command": "/Users/shige/Library/Android/sdk/platform-tools/adb wait-for-device && /Users/shige/Library/Android/sdk/platform-tools/adb shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done' && echo 'Emulator ready!'",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "🚀 Build & Install on Emulator",
+      "type": "shell",
+      "command": "./gradlew installDebug && /Users/shige/Library/Android/sdk/platform-tools/adb shell am start -n com.sportanalyzer.app/.MainActivity",
+      "options": { "cwd": "${workspaceFolder}/android" },
+      "group": { "kind": "build" },
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "🔄 Clean & Build",
+      "type": "shell",
+      "command": "./gradlew clean assembleDebug",
+      "options": { "cwd": "${workspaceFolder}/android" },
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "📋 Logcat (SportAnalyzer)",
+      "type": "shell",
+      "command": "/Users/shige/Library/Android/sdk/platform-tools/adb logcat -c && /Users/shige/Library/Android/sdk/platform-tools/adb logcat MainViewModel:D VideoAnalysisRepository:D GeminiRepository:D *:S",
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "problemMatcher": [],
+      "isBackground": true
+    },
+    {
+      "label": "📟 Show Connected Devices",
+      "type": "shell",
+      "command": "/Users/shige/Library/Android/sdk/platform-tools/adb devices -l",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    }
+  ]
+}

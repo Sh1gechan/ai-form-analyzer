@@ -1,0 +1,23 @@
+# ビルド成果物
+android/app/build/
+android/build/
+android/.gradle/
+.gradle/
+
+# ローカル設定（環境依存）
+android/local.properties
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# ログファイル
+*.log
+
+# 動画ファイル
+*.mov
+*.mp4
+
+# APIキーなどの秘匿情報
+*.keystore
