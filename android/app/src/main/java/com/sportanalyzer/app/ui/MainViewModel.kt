@@ -38,7 +38,21 @@ data class MainUiState(
     val videoPath: String? = null,
     val savedPoseVideoPath: String? = null,
     val usePoseEstimation: Boolean = true,
-    val selectedModel: String = "gemini-2.5-flash"
+    val selectedModel: String = "gemini-2.5-flash",
+    val trimStartMs: Long = 0L,
+    val trimEndMs: Long = 0L,           // 0 = トリムなし（動画全体）
+    val cropLeft: Float = 0f,           // 正規化座標 (0.0〜1.0)
+    val cropTop: Float = 0f,
+    val cropRight: Float = 1f,
+    val cropBottom: Float = 1f,
+    val isCropEnabled: Boolean = false,
+    val chatHistory: List<ChatMessage> = emptyList(),
+    val isChatLoading: Boolean = false
+)
+
+data class ChatMessage(
+    val role: String,   // "user" | "model"
+    val text: String
 )
 
 @HiltViewModel
@@ -179,6 +193,32 @@ class MainViewModel @Inject constructor(
             .edit().putBoolean("use_pose_estimation", enabled).apply()
     }
 
+    // ── Trim & Crop ───────────────────────────────────────────────
+
+    fun setTrimRange(startMs: Long, endMs: Long) {
+        _uiState.update { it.copy(trimStartMs = startMs, trimEndMs = endMs) }
+    }
+
+    /** 空間クロップ領域を設定（正規化座標 0.0〜1.0） */
+    fun setCropRect(left: Float, top: Float, right: Float, bottom: Float) {
+        val isFullFrame = left <= 0.01f && top <= 0.01f && right >= 0.99f && bottom >= 0.99f
+        _uiState.update {
+            it.copy(
+                cropLeft = left.coerceIn(0f, 1f),
+                cropTop = top.coerceIn(0f, 1f),
+                cropRight = right.coerceIn(0f, 1f),
+                cropBottom = bottom.coerceIn(0f, 1f),
+                isCropEnabled = !isFullFrame
+            )
+        }
+    }
+
+    fun clearCrop() {
+        _uiState.update {
+            it.copy(cropLeft = 0f, cropTop = 0f, cropRight = 1f, cropBottom = 1f, isCropEnabled = false)
+        }
+    }
+
     // ── Analysis ──────────────────────────────────────────────────
 
     fun startAnalysis(videoUri: String) {
@@ -253,11 +293,16 @@ class MainViewModel @Inject constructor(
                 )
             }
 
+            val cropParam = if (state.isCropEnabled)
+                floatArrayOf(state.cropLeft, state.cropTop, state.cropRight, state.cropBottom)
+            else null
+
             val result = geminiRepository.analyzeVideo(
                 apiKey   = state.apiKey,
                 videoUri = videoUri,
                 prompt   = state.customPrompt,
-                model    = state.selectedModel
+                model    = state.selectedModel,
+                cropRect = cropParam
             )
 
             result.fold(
@@ -296,6 +341,23 @@ class MainViewModel @Inject constructor(
     }
 
     fun resetAnalysis() {
+        // キャンセル時：骨格推定の一時ファイル（未完了セッション）をクリーンアップ
+        val poseVideoPath = _uiState.value.savedPoseVideoPath
+        if (poseVideoPath != null && _uiState.value.analysisState != AnalysisState.COMPLETED) {
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    val file = java.io.File(poseVideoPath)
+                    val parentDir = file.parentFile
+                    if (parentDir != null && parentDir.name.startsWith("pose_analysis_")) {
+                        parentDir.deleteRecursively()
+                        Log.d("MainViewModel", "キャンセル: 一時ファイルを削除 ${parentDir.absolutePath}")
+                    }
+                } catch (e: Exception) {
+                    Log.e("MainViewModel", "一時ファイル削除エラー", e)
+                }
+            }
+        }
+
         _uiState.update {
             it.copy(
                 analysisState     = AnalysisState.IDLE,
@@ -448,6 +510,76 @@ class MainViewModel @Inject constructor(
             }
             _uiState.update { it.copy(savedPoseVideoPath = null) }
             onComplete(deleted)
+        }
+    }
+
+    // ── Chat (follow-up questions) ────────────────────────────────
+
+    /** 分析結果からチャットを開始 */
+    fun initChat(analysisText: String) {
+        _uiState.update {
+            it.copy(
+                chatHistory = listOf(ChatMessage(role = "model", text = analysisText)),
+                isChatLoading = false
+            )
+        }
+    }
+
+    /** 履歴レコードからチャットを開始 */
+    fun initChatFromHistory(recordId: String) {
+        val record = getHistoryRecord(recordId)
+        if (record != null) {
+            initChat(record.analysisText)
+        }
+    }
+
+    /** フォローアップ質問を送信 */
+    fun sendFollowUp(question: String) {
+        val state = _uiState.value
+        if (state.apiKey.isEmpty() || question.isBlank()) return
+
+        val newHistory = state.chatHistory + ChatMessage(role = "user", text = question)
+        _uiState.update { it.copy(chatHistory = newHistory, isChatLoading = true) }
+
+        viewModelScope.launch {
+            try {
+                val result = geminiRepository.chat(
+                    apiKey = state.apiKey,
+                    history = newHistory,
+                    model = state.selectedModel
+                )
+                result.fold(
+                    onSuccess = { responseText ->
+                        _uiState.update {
+                            it.copy(
+                                chatHistory = it.chatHistory + ChatMessage(role = "model", text = responseText),
+                                isChatLoading = false
+                            )
+                        }
+                    },
+                    onFailure = { error ->
+                        _uiState.update {
+                            it.copy(
+                                chatHistory = it.chatHistory + ChatMessage(
+                                    role = "model",
+                                    text = "⚠️ エラー: ${error.message ?: "不明なエラー"}"
+                                ),
+                                isChatLoading = false
+                            )
+                        }
+                    }
+                )
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        chatHistory = it.chatHistory + ChatMessage(
+                            role = "model",
+                            text = "⚠️ エラー: ${e.message ?: "不明なエラー"}"
+                        ),
+                        isChatLoading = false
+                    )
+                }
+            }
         }
     }
 

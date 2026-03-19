@@ -1,5 +1,6 @@
 package com.sportanalyzer.app.ui.screens.history
 
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -7,11 +8,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -20,6 +23,7 @@ import androidx.navigation.NavController
 import com.sportanalyzer.app.ui.MainViewModel
 import com.sportanalyzer.app.ui.components.MarkdownContent
 import com.sportanalyzer.app.ui.components.SimpleNavBar
+import com.sportanalyzer.app.ui.navigation.Screen
 import com.sportanalyzer.app.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
@@ -77,6 +81,8 @@ fun HistoryDetailScreen(
         else               -> SecondaryLabel
     }
 
+    val context = LocalContext.current
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -87,8 +93,27 @@ fun HistoryDetailScreen(
             onBack   = { navController.popBackStack() },
             subtitle = dateStr,
             trailingContent = {
-                IconButton(onClick = { showDeleteDialog = true }) {
-                    Icon(Icons.Default.Delete, contentDescription = "削除", tint = iOSRed)
+                Row {
+                    IconButton(onClick = {
+                        val shareText = buildString {
+                            appendLine("📊 Forma - フォーム分析結果")
+                            if (record.score > 0) appendLine("スコア: ${record.score}/100 [$modeLabel]")
+                            appendLine("──────────")
+                            appendLine(record.analysisText)
+                            appendLine("──────────")
+                            append("Forma - AI フォーム分析")
+                        }
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, shareText)
+                        }
+                        context.startActivity(Intent.createChooser(intent, "分析結果を共有"))
+                    }) {
+                        Icon(Icons.Default.Share, contentDescription = "共有", tint = iOSBlue)
+                    }
+                    IconButton(onClick = { showDeleteDialog = true }) {
+                        Icon(Icons.Default.Delete, contentDescription = "削除", tint = iOSRed)
+                    }
                 }
             }
         )
@@ -149,6 +174,23 @@ fun HistoryDetailScreen(
                     text = record.analysisText,
                     modifier = Modifier.fillMaxWidth()
                 )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // ── AIに質問ボタン ───────────────────────────────────
+            Button(
+                onClick = {
+                    viewModel.initChatFromHistory(recordId)
+                    navController.navigate(Screen.Chat.createRoute(recordId))
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = iOSIndigo)
+            ) {
+                Text("💬 AIにもっと質問する", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
 
             Spacer(modifier = Modifier.height(32.dp))

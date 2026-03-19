@@ -1,5 +1,6 @@
 package com.sportanalyzer.app.ui.screens.results
 
+import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -8,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,6 +23,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -39,13 +42,40 @@ fun ResultsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val result = uiState.analysisResult
+    val context = LocalContext.current
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(SystemBlack)
     ) {
-        SimpleNavBar(title = "分析結果", onBack = { navController.popBackStack() })
+        SimpleNavBar(
+            title = "分析結果",
+            onBack = { navController.popBackStack() },
+            trailingContent = if (result != null) {
+                {
+                    IconButton(onClick = {
+                        val score = (result.overallStats.averageFormScore * 100).toInt()
+                        val mode = if (uiState.usePoseEstimation) "骨格推定" else "スタンダード"
+                        val shareText = buildString {
+                            appendLine("📊 Forma - フォーム分析結果")
+                            appendLine("スコア: $score/100 [$mode]")
+                            appendLine("──────────")
+                            appendLine(result.analysisText)
+                            appendLine("──────────")
+                            append("Forma - AI フォーム分析")
+                        }
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, shareText)
+                        }
+                        context.startActivity(Intent.createChooser(intent, "分析結果を共有"))
+                    }) {
+                        Icon(Icons.Default.Share, contentDescription = "共有", tint = iOSBlue)
+                    }
+                }
+            } else null
+        )
 
         Column(
             modifier = Modifier
@@ -161,6 +191,23 @@ fun ResultsScreen(
                 }
             }
 
+            // ── AIに質問ボタン ──────────────────────────────────
+            if (result != null) {
+                Button(
+                    onClick = {
+                        viewModel.initChat(result.analysisText)
+                        navController.navigate(Screen.Chat.createRoute(analysisId ?: "current"))
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = iOSIndigo)
+                ) {
+                    Text("💬 AIにもっと質問する", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+
             OutlinedButton(
                 onClick = {
                     viewModel.resetAnalysis()
@@ -237,13 +284,42 @@ private fun VideoSection(
             else -> originalUri
         }
 
+        // 再生速度ステート
+        var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
+
         key(currentUri) {
             VideoPlayer(
                 videoUri = currentUri,
+                speed = playbackSpeed,
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(16f / 9f)
             )
+        }
+
+        // ── 再生速度コントロール ──────────────────────────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "速度",
+                fontSize = 12.sp,
+                color = SecondaryLabel,
+                modifier = Modifier.padding(end = 4.dp)
+            )
+            listOf(0.25f, 0.5f, 1.0f, 1.5f, 2.0f).forEach { speed ->
+                val label = if (speed == 1.0f) "1x" else "${speed}x"
+                VideoTabChip(
+                    label = label,
+                    selected = playbackSpeed == speed,
+                    onClick = { playbackSpeed = speed },
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
     }
 }
@@ -276,6 +352,7 @@ private fun VideoTabChip(
 @Composable
 private fun VideoPlayer(
     videoUri: String,
+    speed: Float = 1.0f,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -288,6 +365,11 @@ private fun VideoPlayer(
             playWhenReady = false
             prepare()
         }
+    }
+
+    // 速度変更を反映
+    LaunchedEffect(speed, player) {
+        player.playbackParameters = PlaybackParameters(speed)
     }
 
     DisposableEffect(player) {

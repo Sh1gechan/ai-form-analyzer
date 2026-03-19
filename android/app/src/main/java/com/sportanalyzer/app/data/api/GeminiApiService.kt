@@ -18,6 +18,7 @@ data class GeminiRequest(
 )
 
 data class ContentPart(
+    val role: String? = null,
     val parts: List<Part>
 )
 

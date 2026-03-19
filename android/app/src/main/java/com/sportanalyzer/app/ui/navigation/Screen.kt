@@ -39,4 +39,28 @@ sealed class Screen(
     ) {
         fun createRoute(id: String) = "history_detail/$id"
     }
+
+    object VideoTrim : Screen(
+        route = "video_trim/{videoUri}",
+        arguments = listOf(navArgument("videoUri") { type = NavType.StringType })
+    ) {
+        fun createRoute(videoUri: String) = "video_trim/$videoUri"
+    }
+
+    object Chat : Screen(
+        route = "chat/{analysisId}",
+        arguments = listOf(navArgument("analysisId") { type = NavType.StringType })
+    ) {
+        fun createRoute(analysisId: String) = "chat/$analysisId"
+    }
+
+    object Compare : Screen(
+        route = "compare/{recordId1}/{recordId2}",
+        arguments = listOf(
+            navArgument("recordId1") { type = NavType.StringType },
+            navArgument("recordId2") { type = NavType.StringType }
+        )
+    ) {
+        fun createRoute(id1: String, id2: String) = "compare/$id1/$id2"
+    }
 }

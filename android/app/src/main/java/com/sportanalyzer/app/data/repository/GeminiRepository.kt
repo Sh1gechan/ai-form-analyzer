@@ -9,6 +9,7 @@ import android.util.Log
 import com.sportanalyzer.app.data.api.*
 import com.sportanalyzer.app.domain.model.AnalysisResult
 import com.sportanalyzer.app.domain.model.OverallStats
+import com.sportanalyzer.app.ui.ChatMessage
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -30,17 +31,36 @@ class GeminiRepository @Inject constructor(
      * File API を使わないためタイムアウトが発生しにくく、
      * かつ骨格推定済み動画・元動画 どちらにも対応します。
      */
+    /**
+     * @param cropRect 正規化座標 [left, top, right, bottom] (0.0〜1.0)。null = クロップなし
+     */
     suspend fun analyzeVideo(
         apiKey: String,
         videoUri: String,
         prompt: String,
-        model: String = "gemini-2.5-flash"
+        model: String = "gemini-2.5-flash",
+        cropRect: FloatArray? = null
     ): Result<AnalysisResult> = withContext(Dispatchers.IO) {
         try {
             // Step 1: キーフレーム抽出
             Log.d("GeminiRepository", "キーフレーム抽出開始: $videoUri")
             // 4 フレームに制限：リクエストサイズを削減しタイムアウトを防ぐ
-            val frames = extractKeyFrames(videoUri, maxFrames = 4)
+            val rawFrames = extractKeyFrames(videoUri, maxFrames = 4)
+
+            // Step 1.5: クロップ適用
+            val frames = if (cropRect != null && cropRect.size == 4) {
+                val cl = cropRect[0]; val ct = cropRect[1]; val cr = cropRect[2]; val cb = cropRect[3]
+                if (cl < cr && ct < cb && (cl > 0.01f || ct > 0.01f || cr < 0.99f || cb < 0.99f)) {
+                    Log.d("GeminiRepository", "クロップ適用: L=$cl T=$ct R=$cr B=$cb")
+                    rawFrames.map { bitmap ->
+                        val x = (cl * bitmap.width).toInt().coerceIn(0, bitmap.width - 1)
+                        val y = (ct * bitmap.height).toInt().coerceIn(0, bitmap.height - 1)
+                        val w = ((cr - cl) * bitmap.width).toInt().coerceIn(1, bitmap.width - x)
+                        val h = ((cb - ct) * bitmap.height).toInt().coerceIn(1, bitmap.height - y)
+                        Bitmap.createBitmap(bitmap, x, y, w, h)
+                    }
+                } else rawFrames
+            } else rawFrames
             if (frames.isEmpty()) {
                 return@withContext Result.failure(
                     Exception("動画からフレームを抽出できませんでした。ファイル形式を確認してください。")
@@ -114,6 +134,39 @@ class GeminiRepository @Inject constructor(
     }
 
     // ────────────────────────────────────────────────────────────
+    // マルチターンチャット
+    // ────────────────────────────────────────────────────────────
+
+    suspend fun chat(
+        apiKey: String,
+        history: List<ChatMessage>,
+        model: String = "gemini-2.5-flash"
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val contents = history.map { msg ->
+                ContentPart(
+                    role = msg.role,
+                    parts = listOf(Part(text = msg.text))
+                )
+            }
+            val request = GeminiRequest(contents = contents)
+            val response = apiService.analyzeVideo(apiKey, model, request)
+
+            if (response.isSuccessful) {
+                val text = response.body()?.candidates?.firstOrNull()
+                    ?.content?.parts?.firstOrNull()?.text
+                if (text != null) Result.success(text)
+                else Result.failure(Exception("Gemini API から空の応答が返りました"))
+            } else {
+                val errorBody = response.errorBody()?.string()
+                Result.failure(Exception("API Error: ${response.code()} - $errorBody"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────
     // キーフレーム抽出
     // ────────────────────────────────────────────────────────────
 
@@ -178,10 +231,20 @@ class GeminiRepository @Inject constructor(
      * recommendations はハードコードしない — Gemini の出力をそのまま analysisText で表示する。
      */
     private fun parseAnalysisResult(geminiText: String): AnalysisResult {
-        // Gemini が "スコア: XX" や "総合評価: XX点" のような表記をしていれば抽出を試みる
-        val scoreRegex = Regex("""(?:スコア|総合評価|評価)[:：]\s*(\d{1,3})""")
-        val scoreMatch = scoreRegex.find(geminiText)
-        val score = scoreMatch?.groupValues?.get(1)?.toFloatOrNull() ?: 75f
+        // Gemini の多様な出力形式に対応するスコア抽出
+        // 例: "スコア: 82", "総合評価: **75点**", "フォームスコア：80/100", "85 / 100"
+        val scorePatterns = listOf(
+            Regex("""(?:フォームスコア|スコア|総合評価|評価|総合スコア)[:：]\s*\**(\d{1,3})\**"""),
+            Regex("""\**(\d{1,3})\**\s*[/／]\s*100"""),
+            Regex("""(?:フォームスコア|スコア|総合評価|評価|総合スコア)[:：]\s*\**(\d{1,3})\**\s*点"""),
+            Regex("""(\d{1,3})\s*点\s*[/／]\s*100\s*点"""),
+            Regex("""(?:フォームスコア|スコア|総合評価|評価).*?(\d{1,3})\s*点""")
+        )
+        val score = scorePatterns.firstNotNullOfOrNull { pattern ->
+            pattern.find(geminiText)?.groupValues?.get(1)?.toFloatOrNull()?.let { value ->
+                if (value in 0f..100f) value else null
+            }
+        } ?: 75f
 
         return AnalysisResult(
             id              = "gemini_analysis_${System.currentTimeMillis()}",

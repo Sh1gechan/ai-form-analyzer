@@ -241,15 +241,33 @@ fun HistoryScreen(
                     }
                 }
 
-                // 選択削除ボタン
+                // 選択アクションボタン
                 if (isEditMode && selectedIds.isNotEmpty()) {
                     item {
-                        Box(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(SystemDark)
-                                .padding(horizontal = 20.dp, vertical = 12.dp)
+                                .padding(horizontal = 20.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            // 2件選択時：比較ボタン
+                            if (selectedIds.size == 2) {
+                                val ids = selectedIds.toList()
+                                Button(
+                                    onClick = {
+                                        navController.navigate(Screen.Compare.createRoute(ids[0], ids[1]))
+                                    },
+                                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = iOSBlue)
+                                ) {
+                                    Icon(Icons.Default.CompareArrows, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("2件を比較する", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+
+                            // 削除ボタン
                             Button(
                                 onClick = { showDeleteDialog = true },
                                 modifier = Modifier.fillMaxWidth().height(44.dp),

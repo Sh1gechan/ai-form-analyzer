@@ -35,23 +35,23 @@ fun HomeScreen(
     navController: NavController,
     viewModel: MainViewModel = hiltViewModel()
 ) {
-    // 元動画分析用ピッカー（骨格推定 OFF）
+    // 元動画分析用ピッカー（骨格推定 OFF）→ トリム画面へ
     val rawVideoPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
             viewModel.setPoseEstimation(false)
-            navController.navigate("analysis/${Uri.encode(it.toString())}")
+            navController.navigate("video_trim/${Uri.encode(it.toString())}")
         }
     }
 
-    // 骨格推定分析用ピッカー（骨格推定 ON）
+    // 骨格推定分析用ピッカー（骨格推定 ON）→ トリム画面へ
     val poseVideoPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         uri?.let {
             viewModel.setPoseEstimation(true)
-            navController.navigate("analysis/${Uri.encode(it.toString())}")
+            navController.navigate("video_trim/${Uri.encode(it.toString())}")
         }
     }
 

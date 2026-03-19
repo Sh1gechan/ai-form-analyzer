@@ -23,12 +23,15 @@ import androidx.navigation.compose.rememberNavController
 import com.sportanalyzer.app.ui.MainViewModel
 import com.sportanalyzer.app.ui.screens.analysis.AnalysisScreen
 import com.sportanalyzer.app.ui.screens.camera.CameraScreen
+import com.sportanalyzer.app.ui.screens.chat.ChatScreen
+import com.sportanalyzer.app.ui.screens.compare.CompareScreen
 import com.sportanalyzer.app.ui.screens.history.HistoryDetailScreen
 import com.sportanalyzer.app.ui.screens.history.HistoryScreen
 import com.sportanalyzer.app.ui.screens.home.HomeScreen
 import com.sportanalyzer.app.ui.screens.results.ResultsScreen
 import com.sportanalyzer.app.ui.screens.settings.SettingsScreen
 import com.sportanalyzer.app.ui.screens.summary.SummaryScreen
+import com.sportanalyzer.app.ui.screens.trim.VideoTrimScreen
 import com.sportanalyzer.app.ui.theme.*
 
 private data class TabItem(
@@ -49,7 +52,10 @@ private val fullScreenRoutes = setOf(
     "analysis",
     "summary",
     "results",
-    "history_detail"
+    "history_detail",
+    "video_trim",
+    "chat",
+    "compare"
 )
 
 @Composable
@@ -176,6 +182,40 @@ fun AppNavigation() {
                 HistoryDetailScreen(
                     navController = navController,
                     recordId      = entry.arguments?.getString("recordId") ?: "",
+                    viewModel     = mainViewModel
+                )
+            }
+
+            composable(
+                route     = Screen.VideoTrim.route,
+                arguments = Screen.VideoTrim.arguments
+            ) { entry ->
+                VideoTrimScreen(
+                    navController = navController,
+                    videoUri      = entry.arguments?.getString("videoUri") ?: "",
+                    viewModel     = mainViewModel
+                )
+            }
+
+            composable(
+                route     = Screen.Chat.route,
+                arguments = Screen.Chat.arguments
+            ) { entry ->
+                ChatScreen(
+                    navController = navController,
+                    analysisId    = entry.arguments?.getString("analysisId") ?: "",
+                    viewModel     = mainViewModel
+                )
+            }
+
+            composable(
+                route     = Screen.Compare.route,
+                arguments = Screen.Compare.arguments
+            ) { entry ->
+                CompareScreen(
+                    navController = navController,
+                    recordId1     = entry.arguments?.getString("recordId1") ?: "",
+                    recordId2     = entry.arguments?.getString("recordId2") ?: "",
                     viewModel     = mainViewModel
                 )
             }
