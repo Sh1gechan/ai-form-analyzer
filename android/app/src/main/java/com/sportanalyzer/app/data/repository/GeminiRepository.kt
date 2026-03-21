@@ -57,7 +57,9 @@ class GeminiRepository @Inject constructor(
                         val y = (ct * bitmap.height).toInt().coerceIn(0, bitmap.height - 1)
                         val w = ((cr - cl) * bitmap.width).toInt().coerceIn(1, bitmap.width - x)
                         val h = ((cb - ct) * bitmap.height).toInt().coerceIn(1, bitmap.height - y)
-                        Bitmap.createBitmap(bitmap, x, y, w, h)
+                        val cropped = Bitmap.createBitmap(bitmap, x, y, w, h)
+                        bitmap.recycle() // 元のBitmapを解放
+                        cropped
                     }
                 } else rawFrames
             } else rawFrames

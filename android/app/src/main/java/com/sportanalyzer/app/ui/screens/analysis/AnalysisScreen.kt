@@ -56,7 +56,6 @@ fun AnalysisScreen(
     }
 
     val isProcessing = uiState.analysisState in listOf(
-        AnalysisState.IDLE,
         AnalysisState.LOADING,
         AnalysisState.PROCESSING,
         AnalysisState.API_ANALYSIS

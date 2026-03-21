@@ -129,7 +129,11 @@ fun SummaryScreen(
             // ── アクションボタン ──────────────────────────────────────
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
-                    onClick = { navController.navigate("results/$analysisId") },
+                    onClick = {
+                        navController.navigate("results/$analysisId") {
+                            launchSingleTop = true
+                        }
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp),
