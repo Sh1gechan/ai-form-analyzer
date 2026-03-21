@@ -11,6 +11,7 @@ sealed class Screen(
     object Home    : Screen("home")
     object History : Screen("history")
     object Settings: Screen("settings")
+    object Camera  : Screen("camera")
 
     object Analysis : Screen(
         route = "analysis/{videoUri}",

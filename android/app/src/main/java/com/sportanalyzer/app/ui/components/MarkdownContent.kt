@@ -17,6 +17,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sportanalyzer.app.ui.theme.*
 
+/** 番号付きリスト判定用の Regex（recomposition ごとの再生成を防ぐ） */
+private val ORDERED_LIST_REGEX = Regex("^\\d+\\.\\s.*")
+
 /**
  * Gemini の Markdown テキストをレンダリングする共有コンポーザブル。
  * ResultsScreen と HistoryDetailScreen の両方で使用される。
@@ -72,7 +75,7 @@ fun MarkdownContent(text: String, modifier: Modifier = Modifier) {
                         InlineMarkdownText(text = content, fontSize = 14.sp, baseColor = SecondaryLabel)
                     }
                 }
-                line.matches(Regex("^\\d+\\.\\s.*")) -> {
+                line.matches(ORDERED_LIST_REGEX) -> {
                     val num = line.substringBefore(".").trim()
                     val content = line.substringAfter(". ").trim()
                     Row(
@@ -117,12 +120,18 @@ fun InlineMarkdownText(
                     }
                     remaining = remaining.substring(end + 2)
                 }
-                remaining.startsWith("*") && remaining.indexOf("*", 1) >= 0 -> {
+                remaining.startsWith("*") && remaining.indexOf("*", 1) > 0 -> {
                     val end = remaining.indexOf("*", 1)
-                    withStyle(SpanStyle(fontStyle = FontStyle.Italic, color = baseColor)) {
-                        append(remaining.substring(1, end))
+                    // m1 修正: 閉じ * が存在し、かつ空でないことを保証
+                    if (end > 1) {
+                        withStyle(SpanStyle(fontStyle = FontStyle.Italic, color = baseColor)) {
+                            append(remaining.substring(1, end))
+                        }
+                        remaining = remaining.substring(end + 1)
+                    } else {
+                        withStyle(SpanStyle(color = baseColor)) { append("*") }
+                        remaining = remaining.substring(1)
                     }
-                    remaining = remaining.substring(end + 1)
                 }
                 remaining.startsWith("`") && remaining.indexOf("`", 1) >= 0 -> {
                     val end = remaining.indexOf("`", 1)

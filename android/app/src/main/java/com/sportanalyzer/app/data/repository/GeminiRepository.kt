@@ -10,6 +10,7 @@ import com.sportanalyzer.app.data.api.*
 import com.sportanalyzer.app.domain.model.AnalysisResult
 import com.sportanalyzer.app.domain.model.OverallStats
 import com.sportanalyzer.app.ui.ChatMessage
+import com.sportanalyzer.app.ui.MainViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -38,14 +39,17 @@ class GeminiRepository @Inject constructor(
         apiKey: String,
         videoUri: String,
         prompt: String,
-        model: String = "gemini-2.5-flash",
-        cropRect: FloatArray? = null
+        model: String = MainViewModel.DEFAULT_MODEL,
+        cropRect: FloatArray? = null,
+        trimStartMs: Long = 0L,
+        trimEndMs: Long = 0L
     ): Result<AnalysisResult> = withContext(Dispatchers.IO) {
         try {
             // Step 1: キーフレーム抽出
-            Log.d("GeminiRepository", "キーフレーム抽出開始: $videoUri")
+            val isPoseVideo = videoUri.contains("pose_analysis") || videoUri.startsWith("/")
+            Log.d("GeminiRepository", "キーフレーム抽出開始: $videoUri (骨格推定動画=${isPoseVideo})")
             // 4 フレームに制限：リクエストサイズを削減しタイムアウトを防ぐ
-            val rawFrames = extractKeyFrames(videoUri, maxFrames = 4)
+            val rawFrames = extractKeyFrames(videoUri, maxFrames = 4, trimStartMs = trimStartMs, trimEndMs = trimEndMs)
 
             // Step 1.5: クロップ適用
             val frames = if (cropRect != null && cropRect.size == 4) {
@@ -53,12 +57,17 @@ class GeminiRepository @Inject constructor(
                 if (cl < cr && ct < cb && (cl > 0.01f || ct > 0.01f || cr < 0.99f || cb < 0.99f)) {
                     Log.d("GeminiRepository", "クロップ適用: L=$cl T=$ct R=$cr B=$cb")
                     rawFrames.map { bitmap ->
-                        val x = (cl * bitmap.width).toInt().coerceIn(0, bitmap.width - 1)
-                        val y = (ct * bitmap.height).toInt().coerceIn(0, bitmap.height - 1)
-                        val w = ((cr - cl) * bitmap.width).toInt().coerceIn(1, bitmap.width - x)
-                        val h = ((cb - ct) * bitmap.height).toInt().coerceIn(1, bitmap.height - y)
-                        val cropped = Bitmap.createBitmap(bitmap, x, y, w, h)
-                        bitmap.recycle() // 元のBitmapを解放
+                        val bw = bitmap.width
+                        val bh = bitmap.height
+                        val x = (cl * bw).toInt().coerceIn(0, bw - 1)
+                        val y = (ct * bh).toInt().coerceIn(0, bh - 1)
+                        val w = ((cr - cl) * bw).toInt().coerceIn(1, bw - x)
+                        val h = ((cb - ct) * bh).toInt().coerceIn(1, bh - y)
+                        // 境界外アクセス防止: x+w と y+h が画像サイズを超えないことを保証
+                        val safeW = w.coerceAtMost(bw - x)
+                        val safeH = h.coerceAtMost(bh - y)
+                        val cropped = Bitmap.createBitmap(bitmap, x, y, safeW, safeH)
+                        bitmap.recycle()
                         cropped
                     }
                 } else rawFrames
@@ -95,6 +104,7 @@ class GeminiRepository @Inject constructor(
                     )
                 )
                 Log.d("GeminiRepository", "フレーム${index + 1}: ${jpegBytes.size / 1024}KB")
+                bitmap.recycle() // エンコード完了後にBitmapを解放してメモリリークを防止
             }
 
             val request = GeminiRequest(
@@ -142,7 +152,7 @@ class GeminiRepository @Inject constructor(
     suspend fun chat(
         apiKey: String,
         history: List<ChatMessage>,
-        model: String = "gemini-2.5-flash"
+        model: String = MainViewModel.DEFAULT_MODEL
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val contents = history.map { msg ->
@@ -172,7 +182,12 @@ class GeminiRepository @Inject constructor(
     // キーフレーム抽出
     // ────────────────────────────────────────────────────────────
 
-    private fun extractKeyFrames(videoUri: String, maxFrames: Int = 8): List<Bitmap> {
+    private fun extractKeyFrames(
+        videoUri: String,
+        maxFrames: Int = 8,
+        trimStartMs: Long = 0L,
+        trimEndMs: Long = 0L
+    ): List<Bitmap> {
         val retriever = MediaMetadataRetriever()
         val frames = mutableListOf<Bitmap>()
         try {
@@ -192,18 +207,36 @@ class GeminiRepository @Inject constructor(
                 MediaMetadataRetriever.METADATA_KEY_DURATION
             )?.toLong() ?: 0L
 
-            val step = if (durationMs > 0) durationMs / maxFrames else 1000L
+            // トリム範囲を適用（trimEndMs == 0 はトリムなし = 動画全体）
+            val effectiveStartMs = trimStartMs.coerceAtLeast(0L)
+            val effectiveEndMs = if (trimEndMs > 0L) trimEndMs.coerceAtMost(durationMs) else durationMs
+            val rangeDurationMs = (effectiveEndMs - effectiveStartMs).coerceAtLeast(1L)
+
+            Log.d("GeminiRepository", "トリム範囲: ${effectiveStartMs}ms ~ ${effectiveEndMs}ms (${rangeDurationMs}ms)")
+
+            // m3 修正: step=0 ガード（極小トリム範囲対応）
+            val step = maxOf(1L, rangeDurationMs / maxFrames)
 
             for (i in 0 until maxFrames) {
-                val timeUs = i * step * 1000L   // マイクロ秒
+                val timeMs = effectiveStartMs + i * step
+                val timeUs = timeMs * 1000L   // マイクロ秒
                 val bitmap = retriever.getFrameAtTime(
                     timeUs,
-                    MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                    MediaMetadataRetriever.OPTION_CLOSEST
                 ) ?: continue
 
-                // 640x360 にリサイズしてメモリ・転送量を削減
-                val scaled = Bitmap.createScaledBitmap(bitmap, 640, 360, true)
-                if (scaled !== bitmap) bitmap.recycle()
+                // アスペクト比を維持してリサイズ（長辺を640pxに制限）
+                val maxDim = 640
+                val scale = maxDim.toFloat() / maxOf(bitmap.width, bitmap.height)
+                val scaled = if (scale < 1f) {
+                    val newW = (bitmap.width * scale).toInt().coerceAtLeast(1)
+                    val newH = (bitmap.height * scale).toInt().coerceAtLeast(1)
+                    val s = Bitmap.createScaledBitmap(bitmap, newW, newH, true)
+                    if (s !== bitmap) bitmap.recycle()
+                    s
+                } else {
+                    bitmap // 元画像が十分小さい場合はそのまま
+                }
                 frames.add(scaled)
             }
         } catch (e: Exception) {

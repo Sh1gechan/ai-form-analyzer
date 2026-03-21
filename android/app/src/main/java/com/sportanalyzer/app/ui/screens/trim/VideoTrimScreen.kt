@@ -38,6 +38,7 @@ import androidx.media3.ui.PlayerView
 import androidx.navigation.NavController
 import com.sportanalyzer.app.ui.MainViewModel
 import com.sportanalyzer.app.ui.components.SimpleNavBar
+import com.sportanalyzer.app.ui.navigation.Screen
 import com.sportanalyzer.app.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -240,8 +241,8 @@ fun VideoTrimScreen(
                     viewModel.setTrimRange(rangeStart.toLong(), rangeEnd.toLong())
                     viewModel.setCropRect(cropLeft, cropTop, cropRight, cropBottom)
                     val encodedUri = Uri.encode(videoUri)
-                    navController.navigate("analysis/$encodedUri") {
-                        popUpTo("video_trim/{videoUri}") { inclusive = true }
+                    navController.navigate(Screen.Analysis.createRoute(encodedUri)) {
+                        popUpTo(Screen.VideoTrim.route) { inclusive = true }
                     }
                 },
                 modifier = Modifier
@@ -259,8 +260,8 @@ fun VideoTrimScreen(
                     viewModel.setTrimRange(0L, 0L)
                     viewModel.clearCrop()
                     val encodedUri = Uri.encode(videoUri)
-                    navController.navigate("analysis/$encodedUri") {
-                        popUpTo("video_trim/{videoUri}") { inclusive = true }
+                    navController.navigate(Screen.Analysis.createRoute(encodedUri)) {
+                        popUpTo(Screen.VideoTrim.route) { inclusive = true }
                     }
                 },
                 modifier = Modifier
@@ -478,27 +479,48 @@ private fun TrimVideoPlayer(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    var playerError by remember { mutableStateOf<String?>(null) }
+
     val player = remember(videoUri) {
-        ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(Uri.parse(videoUri)))
-            repeatMode = Player.REPEAT_MODE_ONE
-            playWhenReady = false
-            prepare()
+        try {
+            ExoPlayer.Builder(context).build().apply {
+                setMediaItem(MediaItem.fromUri(Uri.parse(videoUri)))
+                repeatMode = Player.REPEAT_MODE_ONE
+                playWhenReady = false
+                addListener(object : Player.Listener {
+                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                        playerError = "動画を再生できません"
+                    }
+                })
+                prepare()
+            }
+        } catch (e: Exception) {
+            playerError = "動画プレーヤーの初期化に失敗しました"
+            null
         }
     }
 
     DisposableEffect(player) {
-        onDispose { player.release() }
+        onDispose { player?.release() }
     }
 
-    AndroidView(
-        factory = { ctx ->
-            PlayerView(ctx).apply {
-                this.player = player
-                useController = true
-                setBackgroundColor(android.graphics.Color.BLACK)
-            }
-        },
-        modifier = modifier
-    )
+    if (playerError != null) {
+        Box(
+            modifier = modifier.background(SystemDark),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(playerError ?: "", fontSize = 13.sp, color = SecondaryLabel)
+        }
+    } else if (player != null) {
+        AndroidView(
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    this.player = player
+                    useController = true
+                    setBackgroundColor(android.graphics.Color.BLACK)
+                }
+            },
+            modifier = modifier
+        )
+    }
 }

@@ -38,7 +38,7 @@ data class MainUiState(
     val videoPath: String? = null,
     val savedPoseVideoPath: String? = null,
     val usePoseEstimation: Boolean = true,
-    val selectedModel: String = "gemini-2.5-flash",
+    val selectedModel: String = MainViewModel.DEFAULT_MODEL,
     val trimStartMs: Long = 0L,
     val trimEndMs: Long = 0L,           // 0 = トリムなし（動画全体）
     val cropLeft: Float = 0f,           // 正規化座標 (0.0〜1.0)
@@ -84,6 +84,13 @@ class MainViewModel @Inject constructor(
 
     companion object {
         private const val PREFS_NAME = "sport_analyzer_prefs"
+        private const val KEY_API_KEY = "gemini_api_key"
+        private const val KEY_MODEL = "gemini_model"
+        private const val KEY_CUSTOM_PROMPT = "custom_prompt"
+        private const val KEY_PROMPT_VERSION = "prompt_version"
+        private const val KEY_USE_POSE_ESTIMATION = "use_pose_estimation"
+        const val DEFAULT_MODEL = "gemini-2.5-flash"
+        private const val PROMPT_VERSION = 4
     }
 
     init {
@@ -96,21 +103,20 @@ class MainViewModel @Inject constructor(
     private fun loadInitialData() {
         viewModelScope.launch {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val apiKey     = prefs.getString("gemini_api_key", "") ?: ""
-            val model      = prefs.getString("gemini_model", "gemini-2.5-flash") ?: "gemini-2.5-flash"
-            val usePoseEst = prefs.getBoolean("use_pose_estimation", true)
+            val apiKey     = prefs.getString(KEY_API_KEY, "") ?: ""
+            val model      = prefs.getString(KEY_MODEL, DEFAULT_MODEL) ?: DEFAULT_MODEL
+            val usePoseEst = prefs.getBoolean(KEY_USE_POSE_ESTIMATION, true)
 
-            val PROMPT_VERSION = 4
-            val storedVersion  = prefs.getInt("prompt_version", 0)
+            val storedVersion  = prefs.getInt(KEY_PROMPT_VERSION, 0)
             val prompt = if (storedVersion < PROMPT_VERSION) {
                 val newDefault = getDefaultPrompt()
                 prefs.edit()
-                    .putString("custom_prompt", newDefault)
-                    .putInt("prompt_version", PROMPT_VERSION)
+                    .putString(KEY_CUSTOM_PROMPT, newDefault)
+                    .putInt(KEY_PROMPT_VERSION, PROMPT_VERSION)
                     .apply()
                 newDefault
             } else {
-                prefs.getString("custom_prompt", getDefaultPrompt()) ?: getDefaultPrompt()
+                prefs.getString(KEY_CUSTOM_PROMPT, getDefaultPrompt()) ?: getDefaultPrompt()
             }
 
             _uiState.update {
@@ -161,7 +167,7 @@ class MainViewModel @Inject constructor(
 
     fun saveApiKey() {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit().putString("gemini_api_key", _uiState.value.apiKey).apply()
+            .edit().putString(KEY_API_KEY, _uiState.value.apiKey).apply()
     }
 
     fun updateCustomPrompt(prompt: String) {
@@ -170,7 +176,7 @@ class MainViewModel @Inject constructor(
 
     fun saveCustomPrompt() {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit().putString("custom_prompt", _uiState.value.customPrompt).apply()
+            .edit().putString(KEY_CUSTOM_PROMPT, _uiState.value.customPrompt).apply()
     }
 
     fun updateModel(model: String) {
@@ -179,7 +185,7 @@ class MainViewModel @Inject constructor(
 
     fun saveModel() {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit().putString("gemini_model", _uiState.value.selectedModel).apply()
+            .edit().putString(KEY_MODEL, _uiState.value.selectedModel).apply()
     }
 
     fun togglePoseEstimation() {
@@ -190,7 +196,7 @@ class MainViewModel @Inject constructor(
     fun setPoseEstimation(enabled: Boolean) {
         _uiState.update { it.copy(usePoseEstimation = enabled) }
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit().putBoolean("use_pose_estimation", enabled).apply()
+            .edit().putBoolean(KEY_USE_POSE_ESTIMATION, enabled).apply()
     }
 
     // ── Trim & Crop ───────────────────────────────────────────────
@@ -239,7 +245,11 @@ class MainViewModel @Inject constructor(
 
             if (_uiState.value.usePoseEstimation) {
                 try {
-                    videoAnalysisRepository.analyzeVideo(videoUri = videoUri).collect { p ->
+                    videoAnalysisRepository.analyzeVideo(
+                        videoUri    = videoUri,
+                        trimStartMs = _uiState.value.trimStartMs,
+                        trimEndMs   = _uiState.value.trimEndMs
+                    ).collect { p ->
                         if (p.outputVideoPath != null) {
                             videoForApi = p.outputVideoPath
                             Log.d("MainViewModel", "骨格推定動画パス取得: $videoForApi")
@@ -265,12 +275,16 @@ class MainViewModel @Inject constructor(
                 }
             }
 
-            performApiAnalysis(videoForApi)
+            // 骨格推定動画は既にトリム済みなので、Gemini にはトリムパラメータを渡さない
+            val usedPose = _uiState.value.savedPoseVideoPath != null
+            performApiAnalysis(videoForApi, skipTrim = usedPose)
         }
     }
 
-    private suspend fun performApiAnalysis(videoUri: String) {
+    private suspend fun performApiAnalysis(videoUri: String, skipTrim: Boolean = false) {
         val state = _uiState.value
+        Log.d("MainViewModel", "Gemini API 分析開始: videoUri=$videoUri, skipTrim=$skipTrim, " +
+            "usePose=${state.usePoseEstimation}, model=${state.selectedModel}")
 
         if (state.apiKey.isEmpty()) {
             _uiState.update {
@@ -297,12 +311,18 @@ class MainViewModel @Inject constructor(
                 floatArrayOf(state.cropLeft, state.cropTop, state.cropRight, state.cropBottom)
             else null
 
+            // 骨格推定動画は既にトリム済みなので、トリムパラメータを渡さない
+            val effectiveTrimStart = if (skipTrim) 0L else state.trimStartMs
+            val effectiveTrimEnd   = if (skipTrim) 0L else state.trimEndMs
+
             val result = geminiRepository.analyzeVideo(
-                apiKey   = state.apiKey,
-                videoUri = videoUri,
-                prompt   = state.customPrompt,
-                model    = state.selectedModel,
-                cropRect = cropParam
+                apiKey      = state.apiKey,
+                videoUri    = videoUri,
+                prompt      = state.customPrompt,
+                model       = state.selectedModel,
+                cropRect    = cropParam,
+                trimStartMs = effectiveTrimStart,
+                trimEndMs   = effectiveTrimEnd
             )
 
             result.fold(
@@ -360,14 +380,23 @@ class MainViewModel @Inject constructor(
 
         _uiState.update {
             it.copy(
-                analysisState     = AnalysisState.IDLE,
-                progress          = 0f,
-                currentStep       = "",
-                analysisId        = null,
-                errorMessage      = null,
-                analysisResult    = null,
-                videoPath         = null,
-                savedPoseVideoPath = null
+                analysisState      = AnalysisState.IDLE,
+                progress           = 0f,
+                currentStep        = "",
+                analysisId         = null,
+                errorMessage       = null,
+                analysisResult     = null,
+                videoPath          = null,
+                savedPoseVideoPath = null,
+                trimStartMs        = 0L,
+                trimEndMs          = 0L,
+                cropLeft           = 0f,
+                cropTop            = 0f,
+                cropRight          = 1f,
+                cropBottom         = 1f,
+                isCropEnabled      = false,
+                chatHistory        = emptyList(),
+                isChatLoading      = false
             )
         }
     }
@@ -390,9 +419,9 @@ class MainViewModel @Inject constructor(
                 analysisMode = mode
             )
 
-            val newList = listOf(record) + _historyList.value
-            _historyList.value = newList
-            persistHistory(newList)
+            // M4 修正: アトミックな update で競合を防止
+            _historyList.update { current -> listOf(record) + current }
+            persistHistory(_historyList.value)
         }
     }
 
@@ -463,10 +492,11 @@ class MainViewModel @Inject constructor(
         val sizeBytes: Long
     )
 
-    fun getAnalysisSessionList(): List<AnalysisSession> {
+    // M2 修正: ファイルI/OをIOスレッドで実行
+    suspend fun getAnalysisSessionList(): List<AnalysisSession> = withContext(Dispatchers.IO) {
         val root = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "SportAnalyzer")
-        if (!root.exists()) return emptyList()
-        return root.listFiles()
+        if (!root.exists()) return@withContext emptyList()
+        root.listFiles()
             ?.filter { it.isDirectory }
             ?.sortedByDescending { it.lastModified() }
             ?.map { dir ->

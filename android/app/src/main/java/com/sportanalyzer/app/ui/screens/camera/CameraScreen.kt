@@ -1,9 +1,11 @@
 package com.sportanalyzer.app.ui.screens.camera
 
 import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -23,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import androidx.navigation.NavController
+import com.sportanalyzer.app.ui.navigation.Screen
 import com.sportanalyzer.app.ui.theme.*
 import java.io.File
 import java.text.SimpleDateFormat
@@ -32,7 +35,13 @@ import java.util.*
 fun CameraScreen(navController: NavController) {
     val context = LocalContext.current
     var videoUri by remember { mutableStateOf<Uri?>(null) }
-    var hasPermission by remember { mutableStateOf(false) }
+    // C3 修正: 初期値で既存パーミッションを確認
+    var hasPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+                PackageManager.PERMISSION_GRANTED
+        )
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -44,8 +53,9 @@ fun CameraScreen(navController: NavController) {
         ActivityResultContracts.CaptureVideo()
     ) { success ->
         if (success && videoUri != null) {
-            navController.navigate("analysis/${Uri.encode(videoUri.toString())}") {
-                popUpTo("camera") { inclusive = true }
+            // M1 修正: トリム画面を経由してから分析に進む
+            navController.navigate(Screen.VideoTrim.createRoute(Uri.encode(videoUri.toString()))) {
+                popUpTo(Screen.Camera.route) { inclusive = true }
             }
         }
     }

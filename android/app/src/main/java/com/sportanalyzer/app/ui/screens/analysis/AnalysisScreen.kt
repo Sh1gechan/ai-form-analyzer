@@ -18,6 +18,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.sportanalyzer.app.ui.AnalysisState
 import com.sportanalyzer.app.ui.MainViewModel
+import com.sportanalyzer.app.ui.navigation.Screen
 import com.sportanalyzer.app.ui.theme.*
 import kotlinx.coroutines.delay
 
@@ -29,17 +30,11 @@ fun AnalysisScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    // 分析開始：処理中でなければ常にリセットして再開
-    // （同じURIの再分析・ホームから戻って再選択の両方に対応）
-    LaunchedEffect(videoUri) {
+    // 分析開始：画面が表示されたら必ず新規分析を実行（キャッシュしない）
+    LaunchedEffect(Unit) {
         if (videoUri != null) {
-            val active = uiState.analysisState in listOf(
-                AnalysisState.LOADING, AnalysisState.PROCESSING, AnalysisState.API_ANALYSIS
-            )
-            if (!active) {
-                viewModel.resetAnalysis()
-                viewModel.startAnalysis(videoUri)
-            }
+            viewModel.resetAnalysis()
+            viewModel.startAnalysis(videoUri)
         }
     }
 
@@ -48,8 +43,8 @@ fun AnalysisScreen(
         if (uiState.analysisState == AnalysisState.COMPLETED) {
             delay(400)
             uiState.analysisId?.let { id ->
-                navController.navigate("summary/$id") {
-                    popUpTo("analysis/{videoUri}") { inclusive = true }
+                navController.navigate(Screen.Summary.createRoute(id)) {
+                    popUpTo(Screen.Analysis.route) { inclusive = true }
                 }
             }
         }

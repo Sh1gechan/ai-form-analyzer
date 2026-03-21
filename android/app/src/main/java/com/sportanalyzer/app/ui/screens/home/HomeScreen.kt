@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
 import com.sportanalyzer.app.ui.MainViewModel
+import com.sportanalyzer.app.ui.navigation.Screen
 import com.sportanalyzer.app.ui.theme.*
 
 @Composable
@@ -41,7 +42,7 @@ fun HomeScreen(
     ) { uri: Uri? ->
         uri?.let {
             viewModel.setPoseEstimation(false)
-            navController.navigate("video_trim/${Uri.encode(it.toString())}")
+            navController.navigate(Screen.VideoTrim.createRoute(Uri.encode(it.toString())))
         }
     }
 
@@ -51,7 +52,7 @@ fun HomeScreen(
     ) { uri: Uri? ->
         uri?.let {
             viewModel.setPoseEstimation(true)
-            navController.navigate("video_trim/${Uri.encode(it.toString())}")
+            navController.navigate(Screen.VideoTrim.createRoute(Uri.encode(it.toString())))
         }
     }
 
@@ -115,7 +116,7 @@ fun HomeScreen(
                 title  = "カメラで撮影",
                 detail = "今すぐ動画を撮影する",
                 isLast = true,
-                onClick = { navController.navigate("camera") }
+                onClick = { navController.navigate(Screen.Camera.route) }
             )
         }
 
@@ -130,7 +131,7 @@ fun HomeScreen(
                 title  = "APIキー・モデル設定",
                 detail = "Gemini APIキーとモデルを設定する",
                 isLast = true,
-                onClick = { navController.navigate("settings") }
+                onClick = { navController.navigate(Screen.Settings.route) }
             )
         }
 

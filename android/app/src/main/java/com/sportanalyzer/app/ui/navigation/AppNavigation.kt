@@ -48,14 +48,14 @@ private val tabs = listOf(
 
 // ボトムバーを表示しないルート
 private val fullScreenRoutes = setOf(
-    "camera",
-    "analysis",
-    "summary",
-    "results",
-    "history_detail",
-    "video_trim",
-    "chat",
-    "compare"
+    Screen.Camera.route,
+    "analysis/",     // analysis/{videoUri}
+    "summary/",      // summary/{analysisId}
+    "results/",      // results/{analysisId}
+    "history_detail/",
+    "video_trim/",
+    "chat/",
+    "compare/"
 )
 
 @Composable
@@ -65,7 +65,9 @@ fun AppNavigation() {
     val currentRoute   = backStackEntry?.destination?.route
 
     val showBottomBar = currentRoute != null &&
-        fullScreenRoutes.none { prefix -> currentRoute.startsWith(prefix) }
+        fullScreenRoutes.none { pattern ->
+            currentRoute == pattern || currentRoute.startsWith(pattern)
+        }
 
     val mainViewModel: MainViewModel = hiltViewModel()
 
@@ -138,7 +140,7 @@ fun AppNavigation() {
                 SettingsScreen(navController = navController, viewModel = mainViewModel)
             }
 
-            composable("camera") {
+            composable(Screen.Camera.route) {
                 CameraScreen(navController = navController)
             }
 

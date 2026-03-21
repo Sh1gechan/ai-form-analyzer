@@ -130,7 +130,7 @@ fun SummaryScreen(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
                     onClick = {
-                        navController.navigate("results/$analysisId") {
+                        navController.navigate(Screen.Results.createRoute(analysisId ?: "current")) {
                             launchSingleTop = true
                         }
                     },

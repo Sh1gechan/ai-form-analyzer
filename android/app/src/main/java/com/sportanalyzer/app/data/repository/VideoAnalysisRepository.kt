@@ -62,7 +62,11 @@ class VideoAnalysisRepository @Inject constructor(
         PoseDetection.getClient(options)
     }
 
-    fun analyzeVideo(videoUri: String): Flow<AnalysisProgress> = flow {
+    fun analyzeVideo(
+        videoUri: String,
+        trimStartMs: Long = 0L,
+        trimEndMs: Long = 0L
+    ): Flow<AnalysisProgress> = flow {
 
         try {
             Log.d("VideoAnalysisRepository", "分析開始: $videoUri")
@@ -70,7 +74,7 @@ class VideoAnalysisRepository @Inject constructor(
             emit(AnalysisProgress(AnalysisStage.VIDEO_PROCESSING, 0.0f, "動画を読み込み中..."))
             emit(AnalysisProgress(AnalysisStage.VIDEO_PROCESSING, 0.1f, "動画からフレームを抽出中..."))
 
-            val frames = extractFrames(videoUri)
+            val frames = extractFrames(videoUri, trimStartMs, trimEndMs)
             Log.d("VideoAnalysisRepository", "フレーム抽出完了: ${frames.size}フレーム")
             if (frames.isEmpty()) throw Exception("動画からフレームを抽出できませんでした。")
 
@@ -157,22 +161,51 @@ class VideoAnalysisRepository @Inject constructor(
         }
     }.flowOn(Dispatchers.Default)
 
-    private suspend fun extractFrames(videoUri: String): List<Bitmap> = withContext(Dispatchers.IO) {
+    /**
+     * 動画からフレームを抽出する。
+     * - トリム範囲が指定されている場合はその範囲のみから抽出
+     * - OOM 対策: 最大60フレーム、長辺720pxにダウンスケール
+     */
+    private suspend fun extractFrames(
+        videoUri: String,
+        trimStartMs: Long = 0L,
+        trimEndMs: Long = 0L
+    ): List<Bitmap> = withContext(Dispatchers.IO) {
         val retriever = MediaMetadataRetriever()
         val frames = mutableListOf<Bitmap>()
         try {
             retriever.setDataSource(context, Uri.parse(videoUri))
             val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 0
-            // 5fps で抽出（0.2秒間隔）→ 動きが見える・最大150フレームで30秒をカバー
+
+            // トリム範囲の決定
+            val startMs = if (trimEndMs > trimStartMs) trimStartMs else 0L
+            val endMs = if (trimEndMs > trimStartMs) trimEndMs else durationMs
+
+            // 5fps で抽出（0.2秒間隔）→ 最大60フレームで12秒をカバー（OOM 対策）
             val frameIntervalUs = 200_000L
-            val maxFrames = 150
+            val maxFrames = 60
+            val maxLongSide = 720  // ダウンスケール上限
 
             for (i in 0 until maxFrames) {
-                val timeUs = i * frameIntervalUs
+                val timeUs = startMs * 1000L + i * frameIntervalUs
+                if (timeUs / 1000 > endMs && endMs != 0L) break
                 if (timeUs / 1000 > durationMs && durationMs != 0L) break
-                // OPTION_CLOSEST_SYNC は I フレームしか返さない（→ 同一フレームが連続する）
-                // OPTION_CLOSEST で実際の時刻に最も近いフレームを取得する
-                retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST)?.let { frames.add(it) }
+
+                retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST)?.let { raw ->
+                    // OOM 対策: 長辺 720px にダウンスケール
+                    val longSide = maxOf(raw.width, raw.height)
+                    val scaled = if (longSide > maxLongSide) {
+                        val scale = maxLongSide.toFloat() / longSide
+                        val newW = (raw.width * scale).toInt()
+                        val newH = (raw.height * scale).toInt()
+                        val s = Bitmap.createScaledBitmap(raw, newW, newH, true)
+                        raw.recycle()
+                        s
+                    } else {
+                        raw
+                    }
+                    frames.add(scaled)
+                }
             }
         } catch (e: Exception) {
             Log.e("VideoAnalysisRepository", "Error extracting frames", e)
@@ -184,6 +217,8 @@ class VideoAnalysisRepository @Inject constructor(
     }
 
     private fun createPoseOverlayVideo(originalFrames: List<Bitmap>, poseFrames: List<PoseFrame>): String {
+        require(originalFrames.isNotEmpty()) { "フレームリストが空です" }
+
         val downloadsDir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "SportAnalyzer")
         if (!downloadsDir.exists()) downloadsDir.mkdirs()
 
@@ -220,7 +255,10 @@ class VideoAnalysisRepository @Inject constructor(
         // 5fps（200ms間隔）で抽出しているので PTS も 200_000µs/フレームで書く
         createMP4Video(skeledFrames, mp4File.absolutePath, frameRate = 5, sourceFrameIntervalUs = 200_000L)
 
-        // ← ディレクトリではなく実際の MP4 ファイルパスを返す
+        // M3 修正: Bitmap メモリリーク防止 — エンコード後に全フレームを recycle
+        originalFrames.forEach { it.recycle() }
+        skeledFrames.forEach { it.recycle() }
+
         return mp4File.absolutePath
     }
 
@@ -244,9 +282,11 @@ class VideoAnalysisRepository @Inject constructor(
         val width  = if (srcW % 2 == 0) srcW else srcW - 1
         val height = if (srcH % 2 == 0) srcH else srcH - 1
 
+        // デバイスが対応するカラーフォーマットを選択
+        val colorFormat = selectColorFormat()
+
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
-            setInteger(MediaFormat.KEY_COLOR_FORMAT,
-                MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar)
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, colorFormat)
             setInteger(MediaFormat.KEY_BIT_RATE, 4_000_000)
             setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
@@ -338,6 +378,33 @@ class VideoAnalysisRepository @Inject constructor(
                     }
                 }
             }
+        }
+    }
+
+    /** デバイスが対応する H.264 エンコーダーのカラーフォーマットを選択 */
+    private fun selectColorFormat(): Int {
+        try {
+            val codecInfo = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).let { codec ->
+                val info = codec.codecInfo
+                codec.release()
+                info
+            }
+            val caps = codecInfo.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
+            val supported = caps.colorFormats.toSet()
+
+            // 優先順位: NV12 > YUV420Planar > YUV420Flexible
+            return when {
+                MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar in supported ->
+                    MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
+                MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar in supported ->
+                    MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar
+                MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible in supported ->
+                    MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
+                else -> MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar // fallback
+            }
+        } catch (e: Exception) {
+            Log.w("VideoAnalysisRepository", "カラーフォーマット検出失敗、デフォルト使用", e)
+            return MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
         }
     }
 
